@@ -8,11 +8,11 @@ require "stud/interval"
 
 # Pull events from the Amazon Web Services CloudWatch API.
 #
-# CloudWatch provides various metrics on EC2, EBS and SNS.
+# CloudWatch provides various logs from Lamdba functions.
 #
 # To use this plugin, you *must* have an AWS account
 
-class LogStash::Inputs::CloudWatch < LogStash::Inputs::Base
+class LogStash::Inputs::CloudWatchLogs < LogStash::Inputs::Base
   include LogStash::PluginMixins::AwsConfig
 
   config_name "cloudwatchlogs"
@@ -25,7 +25,7 @@ class LogStash::Inputs::CloudWatch < LogStash::Inputs::Base
   # The default, `900`, means check every 15 minutes
   config :interval, :validate => :number, :default => (60 * 15)
 
-  # Set the granularity of the retruned datapoints.
+  # Set the granularity of the returned datapoints.
   #
   # Must be at least 60 seconds and in multiples of 60.
   config :period, :validate => :number, :default => 60
@@ -71,21 +71,20 @@ class LogStash::Inputs::CloudWatch < LogStash::Inputs::Base
     AWS.config(:logger => @logger)
 
     @cloudwatchlogs = AWS::CloudWatchLogs::Client.new(aws_options_hash)
-    @ec2 = AWS::EC2::Client.new(aws_options_hash)
 
   end # def register
 
   def run(queue)
     Stud.interval(@interval) do
       @logger.debug('Polling CloudWatch API')
-      instance_ids.each do |instance|
-        metrics(instance).each do |metric|
-          opts = options(metric, instance)
-          @cloudwatch.get_metric_statistics(opts)[:datapoints].each do |dp|
-            event = LogStash::Event.new(LogStash::Util.stringify_symbols(dp))
-            event['@timestamp'] = LogStash::Timestamp.new(dp[:timestamp])
-            event['metric'] = metric
-            event['instance'] = instance
+      group_names.each do |group_name|
+        stream_names(group_name).each do |stream_name|
+          opts = options(group_name, stream_name)
+          @cloudwatchlogs.get_log_events(opts).each do |log|
+            event = LogStash::Event.new(LogStash::Util.stringify_symbols(log))
+            event['@timestamp'] = LogStash::Timestamp.new(log[:timestamp])
+            event['message'] = log[:message]
+            event['ingestion_time'] = log[:ingestion_time]
             decorate(event)
             queue << event
           end
@@ -95,53 +94,32 @@ class LogStash::Inputs::CloudWatch < LogStash::Inputs::Base
   end # def run
 
   private
-  def options(metric, instance)
+  def options(group_name, stream_name)
     {
-      namespace: @namespace,
-      metric_name: metric,
-      dimensions: [ { name: 'InstanceId', value: instance } ],
+      log_group_name: group_name,
+      log_stream_name: stream_name,
       start_time: (Time.now - @interval).iso8601,
-      end_time: Time.now.iso8601,
-      period: @period,
-      statistics: @statistics
+      end_time: Time.now.iso8601
     }
   end
 
   private
-  def metrics(instance)
-    metrics_available(instance) & @metrics
+  def group_names()
+    names = []
+    @cloudwatchlogs.describe_log_groups().each do |group|
+      names.push(group[:log_group_name])
+    end
+    names
   end
 
   private
-  def metrics_available(instance)
-    @metrics ||= Hash.new do |h, k|
-      opts = {
-        namespace: @namespace,
-        dimensions: [ { name: 'InstanceId', value: instance } ]
-      }
-
-      h[k] = []
-      @cloudwatch.list_metrics(opts)[:metrics].each do |metrics|
-        h[k].push metrics[:metric_name]
-      end
-      h[k]
+  def stream_names(group_name)
+    opts = { log_group_name: group_name }
+    names = []
+    @cloudwatchlogs.describe_log_streams(opts).each do |stream|
+      names.push(stream[:log_stream_name])
     end
-  end
-
-  private
-  def instance_ids
-    return @instances unless @instances.nil?
-
-    raise('Both the tag_name and tag_values needs to be set if no instances are specified') if @tag_name.nil? || @tag_values.nil?
-    @instances = []
-    @ec2.describe_instances(filters: [ { name: "tag:#{@tag_name}", values: @tag_values } ])[:reservation_set].each do |reservation|
-      @logger.debug reservation
-      reservation[:instances_set].each do |instance|
-        @instances.push instance[:instance_id]
-      end
-    end
-    @logger.debug 'Fetching metrics for the following instances', instances: @instances
-    @instances
+    names
   end
 
 end # class LogStash::Inputs::CloudWatchLogs
