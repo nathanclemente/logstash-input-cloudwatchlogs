@@ -30,36 +30,6 @@ class LogStash::Inputs::CloudWatchLogs < LogStash::Inputs::Base
   # Must be at least 60 seconds and in multiples of 60.
   config :period, :validate => :number, :default => 60
 
-  # The service namespace of the metrics to fetch.
-  #
-  # The default is for the EC2 service. Valid values are 'AWS/EC2', 'AWS/EBS' and
-  # 'AWS/SNS'.
-  config :namespace, :validate => :string, :default => 'AWS/EC2'
-
-  # The instances to check.
-  #
-  # Either specify specific instances using this setting, or use `tag_name` and
-  # `tag_values`. The `instances` setting takes precedence.
-#  config :instances, :validate => :array
-
-  # Specify which tag to use when determining what instances to fetch metrics for
-  #
-  # You need to specify `tag_values` when using this setting. The `instances` setting
-  # takes precedence.
-#  config :tag_name, :validate => :string
-
-  # Specify which tag value to check when determining what instances to fetch metrics for
-  #
-  # You need to specify `tag_name` when using this setting. The `instances` setting
-  # takes precedence.
-#  config :tag_values, :validate => :array
-
-  # Specify the metrics to fetch for each instance
-#  config :metrics, :validate => :array, :default => [ 'CPUUtilization', 'DiskReadOps', 'DiskWriteOps', 'NetworkIn', 'NetworkOut' ]
-
-  # Specify the statistics to fetch for each metric
-#  config :statistics, :validate => :array, :default => [ 'SampleCount', 'Average', 'Minimum', 'Maximum', 'Sum' ]
-
   public
   def aws_service_endpoint(region)
     { region: region }
